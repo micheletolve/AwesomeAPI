@@ -20,6 +20,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+using System;
 using System.Threading.Tasks;
 using AwesomeAPI.Authentication.Entities;
 using AwesomeAPI.Authentication.Extensions;
@@ -30,9 +31,9 @@ namespace AwesomeAPI.Authentication.Requirements
 {
     public class UserActiveHandler : AuthorizationHandler<UserActiveRequirement>
     {
-        private readonly UserManager<ApplicationRole> _userManager;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public UserActiveHandler(UserManager<ApplicationRole> userManager)
+        public UserActiveHandler(UserManager<ApplicationUser> userManager)
         {
             _userManager = userManager;
         }
@@ -41,8 +42,12 @@ namespace AwesomeAPI.Authentication.Requirements
         {
             if (context.User.Identity.IsAuthenticated)
             {
-                var userId = context.User.GetId();
-                var user = await _userManager.FindByIdAsync(userId.ToString());
+                Guid userId = context.User.GetId();
+                ApplicationUser user = await _userManager.FindByIdAsync(userId.ToString());
+                if (user is not null && user.LockoutEnd.GetValueOrDefault() <=  System.DateTimeOffset.UtcNow)
+                {
+                    context.Succeed(requirement);
+                }
             }
         }
     }

@@ -53,8 +53,9 @@ Can get the source easily cloning the repository via SSH, ⚠️ remember to res
 git clone git@github.com:micheletolve/AwesomeAPI.git
 ```
 
+### Contact
+If you want to contact me you can reach me at michele.tolve@gmail.com.
+
 ### License
 
 This software is released under **MIT Licence**.
-
-
