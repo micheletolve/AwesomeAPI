@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Default</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ItemType>GenericProject</ItemType>
+    <ProjectGuid>{F57E0E3F-F675-4C3C-9D44-55B15D3E1139}</ProjectGuid>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Default|AnyCPU' ">
+    <OutputPath>.\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Folder Include="localdb\" />
+    <Folder Include="script\" />
+    <Folder Include="script\sqllite\" />
+    <Folder Include="script\sqllite\v1\" />
+    <Folder Include="script\postgres\" />
+    <Folder Include="script\postgres\v1\" />
+    <Folder Include="script\sqleserver\" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="script\sqllite\v1\authentication.sql" />
+    <None Include="script\postgres\v1\authentication.sql" />
+    <None Include="script\sqleserver\v1\authentication.sql" />
+    <None Include="localdb\awesomeapi_sqlite.db" />
+  </ItemGroup>
+</Project>
