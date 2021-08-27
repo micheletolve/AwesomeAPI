@@ -46,11 +46,10 @@ namespace AwesomeAPI.Controllers
         public async Task<IActionResult> Login(LoginRequest request)
         {
             AuthenticationResponse response = await _identityService.LoginAsync(request);
-            if (response is not null)
-                return Ok(response);
+            if (response is null)
+                return BadRequest();
 
-            return BadRequest();
-
+            return Ok(response);
         }
 
         [HttpPost("register")]
@@ -59,6 +58,17 @@ namespace AwesomeAPI.Controllers
         {
             RegisterResponse response = await _identityService.RegisterAsync(request);
             return StatusCode(response.Succeeded ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest, response);
+        }
+
+        [HttpPost("refresh-token")]
+        [AllowAnonymous]
+        public async Task<IActionResult> RefreshToken(RefreshTokenRequest request)
+        {
+            var response = await _identityService.RefreshTokenAsync(request);
+            if (response is null)
+                return BadRequest();
+
+            return Ok(response);
         }
     }
 }

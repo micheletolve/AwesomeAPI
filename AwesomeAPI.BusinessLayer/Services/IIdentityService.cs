@@ -26,8 +26,9 @@ using AwesomeAPI.Model.Contracts;
 namespace AwesomeAPI.BusinessLayer.Services
 {
     public interface IIdentityService
-    {        
+    {
         Task<AuthenticationResponse> LoginAsync(LoginRequest request);
         Task<RegisterResponse> RegisterAsync(RegisterRequest request);
+        Task<AuthenticationResponse> RefreshTokenAsync(RefreshTokenRequest request);
     }
 }

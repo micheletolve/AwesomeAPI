@@ -26,7 +26,7 @@ namespace AwesomeAPI.Model.Contracts
 {
     public class AuthenticationResponse
     {
-        public User user { get; set; }
         public string AccessToken { get; set; }
+        public string RefreshToken { get; set; }
     }
 }

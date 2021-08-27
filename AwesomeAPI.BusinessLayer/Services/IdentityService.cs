@@ -21,13 +21,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 using System;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using AwesomeAPI.Authentication;
 using AwesomeAPI.Authentication.Entities;
+using AwesomeAPI.Authentication.Extensions;
 using AwesomeAPI.BusinessLayer.Settings;
 using AwesomeAPI.Model.Contracts;
 using AwesomeAPI.Model.Models;
@@ -44,7 +47,7 @@ namespace AwesomeAPI.BusinessLayer.Services
         private readonly SignInManager<ApplicationUser> _signinManager;
 
         public IdentityService(IOptions<JwtSettings> jwtSettings, UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager)
-        { 
+        {
             _jwtSettings = jwtSettings.Value;
             _userManager = userManager;
             _signinManager = signInManager;
@@ -53,49 +56,47 @@ namespace AwesomeAPI.BusinessLayer.Services
         public async Task<AuthenticationResponse> LoginAsync(LoginRequest request)
         {
             var signInResult = await _signinManager.PasswordSignInAsync(request.UserName, request.Password, false, false);
-            if (! signInResult.Succeeded)
+            if (!signInResult.Succeeded)
             {
                 return null;
             }
 
-            var applicationUser = await _userManager.FindByNameAsync(request.UserName);
-            var claims = new[]
+            var dbUser = await _userManager.FindByNameAsync(request.UserName);
+            var userRoles = await _userManager.GetRolesAsync(dbUser);
+
+            var claims = new List<Claim>()
             {
-                new Claim(ClaimTypes.NameIdentifier, applicationUser.Id.ToString()),
-                new Claim(ClaimTypes.Name, applicationUser.UserName),
-                new Claim(ClaimTypes.GivenName, applicationUser.FirstName),
-                new Claim(ClaimTypes.Surname, applicationUser.LastName ?? string.Empty)                
-            };
+                new Claim(ClaimTypes.NameIdentifier, dbUser.Id.ToString()),
+                new Claim(ClaimTypes.Name, dbUser.UserName),
+                new Claim(ClaimTypes.GivenName, dbUser.FirstName),
+                new Claim(ClaimTypes.Surname, dbUser.LastName ?? string.Empty)
+            }.Union(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
 
-            var symmetricSecurityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecurityKey));
-            var signingCredentials = new SigningCredentials(symmetricSecurityKey, SecurityAlgorithms.HmacSha256);
-            var jwtSecurityToken = new JwtSecurityToken(_jwtSettings.Issuer, _jwtSettings.Audience, claims, DateTime.UtcNow, DateTime.UtcNow.AddDays(10), signingCredentials);
+            var authResponse = CreateToken(claims);
 
-            var accessToken = new JwtSecurityTokenHandler().WriteToken(jwtSecurityToken);
-            var response = new AuthenticationResponse
-            {
-                user = new User
-                {
-                    FirstName = applicationUser.FirstName,
-                    LastName = applicationUser.LastName,
-                    Email = applicationUser.Email
-                },
-                AccessToken = accessToken
-            };
+            dbUser.RefreshToken = authResponse.RefreshToken;
+            dbUser.RefreshTokenExpirationDate = DateTime.UtcNow.AddMinutes(_jwtSettings.RefreshTokenExpirationMinutes);
 
-            return response;           
+            await _userManager.UpdateAsync(dbUser);
+
+            return authResponse;
         }
 
         public async Task<RegisterResponse> RegisterAsync(RegisterRequest request)
         {
-            var user = new ApplicationUser
+            var applicationUser = new ApplicationUser
             {
                 FirstName = request.FirstName,
                 LastName = request.LastName,
                 UserName = request.Email,
                 Email = request.Email
             };
-            var result = await _userManager.CreateAsync(user, request.Password);
+            var result = await _userManager.CreateAsync(applicationUser, request.Password);
+            if (result.Succeeded)
+            {
+                // Assign a default role "user"
+                result = await _userManager.AddToRoleAsync(applicationUser, RoleNames.User);
+            }
             var response = new RegisterResponse
             {
                 Succeeded = result.Succeeded,
@@ -103,6 +104,84 @@ namespace AwesomeAPI.BusinessLayer.Services
             };
 
             return response;
+        }
+
+        public async Task<AuthenticationResponse> RefreshTokenAsync(RefreshTokenRequest request)
+        {
+            var applicationUser = ValidateToken(request.AccessToken);
+            if (applicationUser is null)
+            {
+                return null;
+            }
+
+            var userId = applicationUser.GetId();
+            var dbUser = await _userManager.FindByIdAsync(userId.ToString());
+            if (dbUser?.RefreshToken is null || dbUser?.RefreshTokenExpirationDate < DateTime.UtcNow || dbUser?.RefreshToken != request.RefreshToken)
+            {
+                return null;
+            }
+
+            var authResponse = CreateToken(applicationUser.Claims);
+            dbUser.RefreshToken = authResponse.RefreshToken;
+            dbUser.RefreshTokenExpirationDate = DateTime.UtcNow.AddMinutes(_jwtSettings.RefreshTokenExpirationMinutes);
+
+            await _userManager.UpdateAsync(dbUser);
+            return authResponse;
+        }
+        private AuthenticationResponse CreateToken(IEnumerable<Claim> claims)
+        {
+            var symmetricSecurityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecurityKey));
+            var signingCredentials = new SigningCredentials(symmetricSecurityKey, SecurityAlgorithms.HmacSha256);
+            var jwtSecurityToken = new JwtSecurityToken(_jwtSettings.Issuer, _jwtSettings.Audience, claims, DateTime.UtcNow, DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenExpirationMinutes), signingCredentials);
+
+            var accessToken = new JwtSecurityTokenHandler().WriteToken(jwtSecurityToken);
+            var response = new AuthenticationResponse
+            {
+                AccessToken = accessToken,
+                RefreshToken = GenerateRefreshToken(_jwtSettings.RefreshTokenByteLength)
+            };
+
+            return response;
+        }
+
+        private ClaimsPrincipal ValidateToken(string accessToken)
+        {
+            var tokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidIssuer = _jwtSettings.Issuer,
+                ValidateAudience = true,
+                ValidAudience = _jwtSettings.Audience,
+                ValidateLifetime = false,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecurityKey)),
+                RequireExpirationTime = true,
+                ClockSkew = TimeSpan.Zero
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            try
+            {
+                var applicationUser = tokenHandler.ValidateToken(accessToken, tokenValidationParameters, out var securityToken);
+                if (securityToken is JwtSecurityToken jwtSecurityToken && jwtSecurityToken.Header.Alg == SecurityAlgorithms.HmacSha256)
+                {
+                    return applicationUser;
+                }
+            }
+            catch (System.Exception)
+            {
+                throw;
+            }
+            return null;
+        }
+
+        private static string GenerateRefreshToken(int byteLength)
+        {
+            byte[] random = new byte[byteLength];
+            using var generator = RandomNumberGenerator.Create();
+            generator.GetBytes(random);
+
+            return Convert.ToBase64String(random);
         }
     }
 }
